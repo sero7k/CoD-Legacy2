@@ -1,0 +1,11 @@
+# CoD Legacy's Rust side: static libraries linked into CodLegacy.exe
+# (built by premake's prebuild step: cargo build --release --target
+# x86_64-pc-windows-msvc).
+[workspace]
+resolver = "2"
+members = ["codlegacy"]
+
+[profile.release]
+panic = "abort"
+lto = true
+opt-level = 3

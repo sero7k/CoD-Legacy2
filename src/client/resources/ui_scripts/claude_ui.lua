@@ -34,7 +34,11 @@ end
 
 local log = function(msg)
     pcall(function()
-        print("[claude_ui] " .. tostring(msg))
+        local line = "[claude_ui] " .. tostring(msg)
+        if game and game.claudelog then
+            game:claudelog(line)
+        end
+        print(line)
     end)
 end
 
@@ -160,6 +164,15 @@ local function recolor(t, depth, seen)
             end
         end
     end
+end
+
+-- In a match nothing below runs: the restyle hooks every element and menu
+-- (registerAnimationState, UIImage.new, MenuTemplate.new), and in a match
+-- that reaches the class select the player needs to spawn. The HUD is
+-- claude_hud's (its own wrapped widgets only).
+if not in_frontend then
+    log("in a match: menu restyle off")
+    return
 end
 
 do

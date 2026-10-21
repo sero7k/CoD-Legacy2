@@ -316,7 +316,13 @@ dependson {"tlsdll", "runner"}
 
 links {"common"}
 
+-- The Rust core (rust/codlegacy, a static library) is built before the
+-- client and linked into it, with the system libraries Rust's std uses.
+libdirs {"%{_MAIN_SCRIPT_DIR}/rust/target/x86_64-pc-windows-msvc/release"}
+links {"codlegacy", "ws2_32", "userenv", "bcrypt", "ntdll", "advapi32"}
+
 prebuildcommands {"pushd %{_MAIN_SCRIPT_DIR}", "tools\\premake5 generate-buildinfo", "popd"}
+prebuildcommands {"pushd %{_MAIN_SCRIPT_DIR}\\rust", "cargo build --release --target x86_64-pc-windows-msvc", "popd"}
 
 if _OPTIONS["copy-to"] then
 	postbuildcommands {"copy /y \"$(TargetPath)\" \"" .. _OPTIONS["copy-to"] .. "\""}

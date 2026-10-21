@@ -30,6 +30,8 @@
 #include <utils/io.hpp>
 #include <utils/binary_resource.hpp>
 
+#include "rust/codlegacy.h"
+
 #include "steam/steam.hpp"
 
 #include <discord_rpc.h>
@@ -79,8 +81,16 @@ namespace ui_scripting
 			return itr == globals.loaded_scripts.end() ? std::string() : itr->second;
 		}
 
+		// Our UI's log (release builds print no LUI errors): claude_ui_errors.log
+		// beside the game.
+		void claude_log(const std::string& line)
+		{
+			utils::io::write_file("claude_ui_errors.log", line + "\n", true);
+		}
+
 		void print_error(const std::string& error)
 		{
+			claude_log("LUI script error: " + error);
 #ifdef DEBUG
 			console::error("************** LUI script execution error **************\n");
 			console::error("%s\n", error.data());
@@ -216,6 +226,22 @@ namespace ui_scripting
 			using game = table;
 			auto game_type = game();
 			lua["game"] = game_type;
+
+			game_type["rustversion"] = [](const game&)
+			{
+				return std::string(codlegacy_version());
+			};
+
+			game_type["rustadd"] = [](const game&, const int a, const int b)
+			{
+				int sum = 0;
+				return codlegacy_add(a, b, &sum) ? sum : 0;
+			};
+
+			game_type["claudelog"] = [](const game&, const std::string& line)
+			{
+				claude_log(line);
+			};
 
 			game_type["getfps"] = [](const game&)
 			{

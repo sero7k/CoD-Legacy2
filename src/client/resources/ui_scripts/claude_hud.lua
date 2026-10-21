@@ -30,7 +30,11 @@ end
 
 local log = function(msg)
     pcall(function()
-        print("[claude_hud] " .. tostring(msg))
+        local line = "[claude_hud] " .. tostring(msg)
+        if game and game.claudelog then
+            game:claudelog(line)
+        end
+        print(line)
     end)
 end
 
@@ -1200,3 +1204,10 @@ wrap("obituary", build_feed)
 wrap("damageFeedbackHudDef", build_hitmarker)
 pcall(wrap_minimap)
 log("loaded")
+
+-- The Rust core, linked into the client (rust/codlegacy).
+pcall(function()
+    if game.rustversion then
+        log("rust: " .. tostring(game:rustversion()) .. ", 2 + 3 = " .. tostring(game:rustadd(2, 3)))
+    end
+end)

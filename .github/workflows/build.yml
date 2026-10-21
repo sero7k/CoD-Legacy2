@@ -19,6 +19,11 @@ jobs:
 
       - uses: microsoft/setup-msbuild@v2
 
+      - name: Rust toolchain (the client links rust/codlegacy)
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add x86_64-pc-windows-msvc
+
       - name: Generate the Visual Studio solution
         run: tools\premake5.exe vs2022
 
