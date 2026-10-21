@@ -657,4 +657,45 @@ if not in_frontend then
     end
 end
 
+----------------------------------------------------------------------------
+-- 6. The front end in our shell's words and order (shell/mod.rs): the main
+-- menu's PLAY ONLINE is MULTIPLAYER; in Multiplayer, FIND A MATCH (HMW's
+-- server browser) and CUSTOM GAME (private match) come first, then
+-- Create-a-Class, Barracks and the rest as HMW has them.
+----------------------------------------------------------------------------
+
+if in_frontend then
+    local labels = {
+        PLATFORM_PLAY_ONLINE = "MULTIPLAYER",
+        LUA_MENU_SERVERLIST = "FIND A MATCH",
+        MENU_PRIVATE_MATCH = "CUSTOM GAME",
+    }
+    for key, text in pairs(labels) do
+        pcall(function()
+            game:addlocalizedstring(key, text)
+        end)
+    end
+
+    local builders = LUI.MenuBuilder and LUI.MenuBuilder.m_types_build
+    local stock = builders and builders.menu_xboxlive
+    if stock then
+        builders.menu_xboxlive = function(...)
+            local menu = stock(...)
+            pcall(function()
+                local list = menu and menu.list
+                local btn = list and list:getChildById("menu_xboxlive_private_match")
+                if btn then
+                    list:removeElement(btn)
+                    if not pcall(function()
+                        list:insertElement(btn, 2)
+                    end) then
+                        list:addElement(btn)
+                    end
+                end
+            end)
+            return menu
+        end
+    end
+end
+
 log("loaded")
