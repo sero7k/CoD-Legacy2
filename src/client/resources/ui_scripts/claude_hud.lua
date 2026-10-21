@@ -1,16 +1,23 @@
--- Claude HUD for Horizon MW: our game's in-match HUD (crates/ui/src/hud_modern.rs)
--- rebuilt in H1's LUI. It replaces two of H1's HUD widgets:
+-- Claude HUD for Horizon MW: our game's in-match HUD (crates/ui/src/hud_modern.rs,
+-- hud_match.rs) rebuilt in H1's LUI. It replaces H1's HUD widgets:
 --   weaponInfoHudDef  -> bottom right: gun name over a dark box with the clip in
---                        big figures and the rest of the ammo; bottom left: the
---                        player's name over a thin health bar.
+--                        big figures and the rest of the ammo, the scorestreak
+--                        column over them; bottom left: the player's name over
+--                        a thin health bar.
 --   teamScoresHudDef  -> top centre: his side's score and bar (blue), the team
 --                        badges, the clock, the enemy's score and bar (red),
 --                        WINNING / LOSING / TIED under it.
--- Both stay inside H1's own HUD wrappers, so H1 still hides them in menus, the
+--   obituary          -> bottom left: our kill feed (team colours, him gold).
+--   damageFeedbackHudDef -> the hit marker: a white X, red on the kill.
+--   minimapHudDef     -> top left: H1's map and tape on our ground, edge and
+--                        tape strip (the map itself is engine-drawn).
+-- All stay inside H1's own HUD wrappers, so H1 still hides them in menus, the
 -- killcam and when the HUD is off. Every call into the game is guarded: if
--- building our widget fails, H1's stock widget is returned instead.
+-- building our widget fails, H1's stock widget is returned instead. H1's
+-- remaining boxes (the d-pad, perks, splashes, scoreboard) are restyled by
+-- claude_ui's material rules and palette.
 --
--- Turn it off by deleting this folder (ui_scripts/claude_hud).
+-- Built into the client as resource CLAUDE_HUD (loaded after CLAUDE_UI).
 
 do
     local ok, mp = pcall(function()
@@ -581,6 +588,578 @@ local function build_score_hud()
 end
 
 ----------------------------------------------------------------------------
+-- Shared by the pieces below.
+----------------------------------------------------------------------------
+
+local GOLD = { r = 0.98, g = 0.72, b = 0.30 }
+local HIT_RED = { r = 0.96, g = 0.16, b = 0.12 }
+local EDGE = { r = 0.59, g = 0.59, b = 0.59 }
+
+-- A clock in ms for timers (the game's, else our own count of ticks).
+local ticks = 0
+local function text_width(text, f, h)
+    local ok, l, _, r = pcall(luiglobals.GetTextDimensions, text, f, h)
+    if ok and type(l) == "number" and type(r) == "number" then
+        return math.abs(r - l)
+    end
+    return string.len(tostring(text)) * h * 0.55
+end
+
+local function now_ms(step)
+    local t = try(nil, Engine.GetTimeMsecs)
+    if type(t) == "number" then
+        return t
+    end
+    ticks = ticks + (step or 0)
+    return ticks
+end
+
+local function geometry(state)
+    local g = {}
+    for _, k in ipairs({ "topAnchor", "bottomAnchor", "leftAnchor", "rightAnchor", "top", "bottom", "left", "right", "width", "height" }) do
+        if state[k] ~= nil then
+            g[k] = state[k]
+        end
+    end
+    return g
+end
+
+-- A thin edge round an element (four lines along its sides).
+local function edge(parent, color, alpha, w)
+    local sides = {
+        { topAnchor = true, bottomAnchor = false, leftAnchor = true, rightAnchor = true, top = 0, height = w, left = 0, right = 0 },
+        { topAnchor = false, bottomAnchor = true, leftAnchor = true, rightAnchor = true, bottom = 0, height = w, left = 0, right = 0 },
+        { topAnchor = true, bottomAnchor = true, leftAnchor = true, rightAnchor = false, top = 0, bottom = 0, left = 0, width = w },
+        { topAnchor = true, bottomAnchor = true, leftAnchor = false, rightAnchor = true, top = 0, bottom = 0, right = 0, width = w },
+    }
+    local lines = {}
+    for _, s in ipairs(sides) do
+        local line = rect(s, color, alpha)
+        parent:addElement(line)
+        table.insert(lines, { el = line, state = s })
+    end
+    return lines
+end
+
+local function recolor_edge(lines, key, color, alpha)
+    for _, l in ipairs(lines) do
+        local s = {}
+        for k, v in pairs(l.state) do
+            s[k] = v
+        end
+        s.color = color
+        s.alpha = alpha
+        set_state(l.el, key, s)
+    end
+end
+
+----------------------------------------------------------------------------
+-- Bottom right, over the gun's name: his scorestreaks in a column of
+-- squares on the right edge (hud_modern.rs, as Modern Warfare 3's), the
+-- dearest at the top; the earned one lit in the accent. From H1's own
+-- scorestreak omnvars (ks_icon_1..3, ks_hasStreak); the column stays empty
+-- when the match sends none.
+----------------------------------------------------------------------------
+
+local STREAK = px(56)
+local STREAK_GAP = math.max(2, px(3))
+
+local function streak_material(idx)
+    local tbl = KillstreakTable
+    if type(tbl) ~= "table" or not tbl.Cols then
+        return nil
+    end
+    local name = try("", Engine.TableLookup, tbl.File, tbl.Cols.Index, tostring(idx), tbl.Cols.EarnedIcon)
+    if type(name) ~= "string" or name == "" or name == "specialty_ks_null" then
+        return nil
+    end
+    return try(nil, luiglobals.RegisterMaterial, name)
+end
+
+-- Whether his streak `i` is earned (H1 keeps a bit per streak; bit 0 is
+-- the care package's "gimme" slot).
+local function has_streak(i)
+    local bits = try(0, Game.GetOmnvar, "ks_hasStreak")
+    if type(bits) ~= "number" then
+        return false
+    end
+    return math.floor(bits / (2 ^ i)) % 2 == 1
+end
+
+local function add_streak_column(root)
+    local base = CORNER_BOTTOM + BOX_H + px(2) + NAME_H + px(4)
+    local squares = {}
+    for i = 1, 3 do
+        local bottom = -(base + (i - 1) * (STREAK + STREAK_GAP))
+        local g = {
+            rightAnchor = true,
+            bottomAnchor = true,
+            leftAnchor = false,
+            topAnchor = false,
+            right = -CORNER_RIGHT,
+            bottom = bottom,
+            width = STREAK,
+            height = STREAK,
+        }
+        local box = LUI.UIElement.new(g)
+        local ground = rect({ topAnchor = true, bottomAnchor = true, leftAnchor = true, rightAnchor = true, top = 0, bottom = 0, left = 0, right = 0 }, PANEL, PANEL_ALPHA)
+        box:addElement(ground)
+        local glow = rect({ topAnchor = true, bottomAnchor = true, leftAnchor = true, rightAnchor = true, top = 0, bottom = 0, left = 0, right = 0 }, BLUE, 0)
+        box:addElement(glow)
+        local inner = math.floor(STREAK * 0.74 + 0.5)
+        local icon = LUI.UIImage.new({
+            topAnchor = false,
+            bottomAnchor = false,
+            leftAnchor = false,
+            rightAnchor = false,
+            top = -inner / 2,
+            bottom = inner / 2,
+            left = -inner / 2,
+            right = inner / 2,
+            material = white(),
+            alpha = 0,
+        })
+        box:addElement(icon)
+        local lines = edge(box, WHITE, 0.16, 1)
+        local shown, hidden = {}, {}
+        for k, v in pairs(g) do
+            shown[k] = v
+            hidden[k] = v
+        end
+        shown.alpha = 1
+        hidden.alpha = 0
+        box:registerAnimationState("shown", shown)
+        box:registerAnimationState("hidden", hidden)
+        box:animateToState("hidden")
+        root:addElement(box)
+        squares[i] = { box = box, glow = glow, icon = icon, lines = lines, idx = nil, inner = inner }
+    end
+
+    local function update()
+        for i = 1, 3 do
+            local s = squares[i]
+            local idx = try(0, Game.GetOmnvar, "ks_icon_" .. i)
+            if type(idx) ~= "number" or idx <= 0 then
+                if s.idx ~= 0 then
+                    s.idx = 0
+                    s.box:animateToState("hidden")
+                end
+            else
+                if s.idx ~= idx then
+                    s.idx = idx
+                    local mat = streak_material(idx)
+                    if mat then
+                        pcall(function()
+                            s.icon:setImage(mat)
+                        end)
+                    end
+                    s.has_icon = mat ~= nil
+                    s.box:animateToState("shown")
+                end
+                local ready = has_streak(i)
+                local half = s.inner / 2
+                set_state(s.icon, "i", {
+                    topAnchor = false,
+                    bottomAnchor = false,
+                    leftAnchor = false,
+                    rightAnchor = false,
+                    top = -half,
+                    bottom = half,
+                    left = -half,
+                    right = half,
+                    color = WHITE,
+                    alpha = s.has_icon and (ready and 1 or 0.42) or 0,
+                })
+                set_state(s.glow, "g", {
+                    topAnchor = true,
+                    bottomAnchor = true,
+                    leftAnchor = true,
+                    rightAnchor = true,
+                    top = 0,
+                    bottom = 0,
+                    left = 0,
+                    right = 0,
+                    color = BLUE,
+                    alpha = ready and 0.3 or 0,
+                })
+                recolor_edge(s.lines, "e", ready and BLUE or WHITE, ready and 1 or 0.16)
+            end
+        end
+    end
+    every(root, 250, "claude_hud_streaks", update)
+    pcall(update)
+end
+
+----------------------------------------------------------------------------
+-- Bottom left, over his name: the kill feed (hud_match.rs): "Attacker
+-- [weapon] Victim" rows on a dark strip, names in team colours (his side
+-- blue, the enemy red, him gold), at most five, each going after six
+-- seconds. Fed by H1's own obituary events.
+----------------------------------------------------------------------------
+
+local FEED_ROWS = 5
+local FEED_LIFE = 6000
+local FEED_OUT = 600
+local FEED_TEXT = px(22)
+local FEED_ROW_H = FEED_TEXT + px(6)
+local FEED_GAP = math.max(1, px(3))
+local FEED_BOTTOM = px(72)
+local FEED_LEFT = px(23)
+
+-- H1's obituary module (its getColorForClientNum tells his side, the
+-- enemy's and his own apart).
+local obituary_module = nil
+local function find_obituary()
+    if obituary_module == nil then
+        obituary_module = false
+        pcall(function()
+            for _, v in pairs(LUI.mp_hud) do
+                if type(v) == "table" and type(rawget(v, "getColorForClientNum")) == "function" then
+                    obituary_module = v
+                end
+            end
+        end)
+    end
+    return obituary_module or nil
+end
+
+local function name_color(cn)
+    if type(cn) ~= "number" or cn < 0 then
+        return WHITE
+    end
+    local me = try(nil, Game.GetPlayerClientnum)
+    if me ~= nil and cn == me then
+        return GOLD
+    end
+    local hud = Swatches and Swatches.HUD
+    local m = find_obituary()
+    if m and hud then
+        local team = try(nil, Game.GetPlayerTeam)
+        local ok, c = pcall(m.getColorForClientNum, cn, team)
+        if ok and c ~= nil then
+            if c == hud.Me then
+                return GOLD
+            elseif c == hud.Enemies then
+                return RED
+            elseif c == hud.Allies then
+                return BLUE
+            end
+        end
+    end
+    if try(false, GameX and GameX.gameModeIsFFA) then
+        return RED
+    end
+    return WHITE
+end
+
+local function player_name(cn)
+    if type(cn) ~= "number" or cn < 0 then
+        return ""
+    end
+    local n = try("", Game.GetPlayerName, cn)
+    return type(n) == "string" and n or ""
+end
+
+local function build_feed()
+    local root = fullscreen()
+    local rows = {}
+    local feed_font = font("TitleFontTinyBold", "TitleFontBold")
+
+    local function place(row, n, alpha, ms)
+        local state = {
+            leftAnchor = true,
+            bottomAnchor = true,
+            topAnchor = false,
+            rightAnchor = false,
+            left = FEED_LEFT,
+            bottom = -(FEED_BOTTOM + n * (FEED_ROW_H + FEED_GAP)),
+            width = row.width,
+            height = FEED_ROW_H,
+            alpha = alpha,
+        }
+        row.key = (row.key or 0) + 1
+        row.el:registerAnimationState("p" .. row.key, state)
+        row.el:animateToState("p" .. row.key, ms or 0)
+    end
+
+    local function layout()
+        local n = #rows
+        for i, row in ipairs(rows) do
+            if not row.leaving then
+                place(row, n - i, 1, 0)
+            end
+        end
+    end
+
+    local function add_row(parts)
+        local pad = px(8)
+        local gap = px(7)
+        local x = pad
+        local el = LUI.UIElement.new({
+            leftAnchor = true,
+            bottomAnchor = true,
+            left = FEED_LEFT,
+            bottom = -FEED_BOTTOM,
+            width = 10,
+            height = FEED_ROW_H,
+            alpha = 0,
+        })
+        local strip = rect({ topAnchor = true, bottomAnchor = true, leftAnchor = true, rightAnchor = true, top = 0, bottom = 0, left = 0, right = 0 }, PANEL, 0.42)
+        el:addElement(strip)
+        for _, p in ipairs(parts) do
+            if p.text and p.text ~= "" then
+                local w = math.ceil(text_width(p.text, feed_font, FEED_TEXT))
+                local t = LUI.UIText.new({
+                    leftAnchor = true,
+                    topAnchor = false,
+                    bottomAnchor = false,
+                    rightAnchor = false,
+                    left = x,
+                    top = -FEED_TEXT / 2,
+                    bottom = FEED_TEXT / 2,
+                    width = w + 2,
+                    font = feed_font,
+                    color = p.color,
+                    alpha = 1,
+                })
+                t:setText(p.text)
+                pcall(function()
+                    t:setTextStyle(CoD.TextStyle.Shadowed)
+                end)
+                el:addElement(t)
+                x = x + w + gap
+            elseif p.material then
+                local h = math.floor(FEED_TEXT * 1.05 + 0.5)
+                local wide = p.aspect or 1
+                local w, ih = h * wide * 1.1, h
+                if wide >= 4 then
+                    w, ih = h * 3.2, h * 0.8
+                end
+                w = math.floor(w + 0.5)
+                el:addElement(LUI.UIImage.new({
+                    leftAnchor = true,
+                    topAnchor = false,
+                    bottomAnchor = false,
+                    rightAnchor = false,
+                    left = x,
+                    top = -ih / 2,
+                    bottom = ih / 2,
+                    width = w,
+                    material = p.material,
+                    alpha = 1,
+                }))
+                x = x + w + gap
+            end
+        end
+        local row = { el = el, width = x - gap + px(12), born = now_ms(0) }
+        root:addElement(el)
+        table.insert(rows, row)
+        while #rows > FEED_ROWS do
+            local old = table.remove(rows, 1)
+            pcall(function()
+                old.el:close()
+            end)
+        end
+        layout()
+    end
+
+    root:registerEventHandler("obituary", function(_, event)
+        local ok, err = pcall(function()
+            if type(event) ~= "table" then
+                return
+            end
+            local parts = {}
+            local attacker, victim = event.attacker, event.victim
+            if attacker ~= nil and attacker ~= victim then
+                local a = player_name(attacker)
+                if a ~= "" then
+                    table.insert(parts, { text = a, color = name_color(attacker) })
+                end
+            end
+            if event.icon ~= nil then
+                local aspect = try(1, Engine.GetMaterialAspectRatio, event.icon)
+                table.insert(parts, { material = event.icon, aspect = type(aspect) == "number" and aspect or 1 })
+            else
+                table.insert(parts, { text = "-", color = DIM })
+            end
+            local v = player_name(victim)
+            if v ~= "" then
+                table.insert(parts, { text = v, color = name_color(victim) })
+            end
+            add_row(parts)
+        end)
+        if not ok then
+            log("feed: " .. tostring(err))
+        end
+    end)
+
+    root:registerEventHandler("game_message", function(_, event)
+        pcall(function()
+            if type(event) == "table" and type(event.message) == "string" and event.message ~= "" then
+                add_row({ { text = event.message, color = WHITE } })
+            end
+        end)
+    end)
+
+    every(root, 100, "claude_hud_feed", function()
+        local t = now_ms(100)
+        local i = 1
+        local changed = false
+        while i <= #rows do
+            local row = rows[i]
+            local age = t - row.born
+            if age >= FEED_LIFE + FEED_OUT then
+                pcall(function()
+                    row.el:close()
+                end)
+                table.remove(rows, i)
+                changed = true
+            else
+                if age >= FEED_LIFE and not row.leaving then
+                    row.leaving = true
+                    place(row, #rows - i, 0, FEED_OUT)
+                end
+                i = i + 1
+            end
+        end
+        if changed then
+            layout()
+        end
+    end)
+    return root
+end
+
+----------------------------------------------------------------------------
+-- The middle of the screen: the hit marker (hud_match.rs), a white X on
+-- each hit that pops in a little bigger and fades in ~0.3 s; red and a
+-- little bigger on the killing shot. H1's own damage_feedback omnvar drives
+-- it; the X is H1's own picture of one.
+----------------------------------------------------------------------------
+
+local HIT_SIDE = px(30)
+
+local function build_hitmarker()
+    local root = fullscreen()
+    local mat = try(nil, luiglobals.RegisterMaterial, "damage_feedback")
+    if not mat then
+        error("no damage_feedback material")
+    end
+    local function st(side, color, alpha)
+        local h = math.floor(side / 2 + 0.5)
+        return {
+            topAnchor = false,
+            bottomAnchor = false,
+            leftAnchor = false,
+            rightAnchor = false,
+            top = -h,
+            bottom = h,
+            left = -h,
+            right = h,
+            color = color,
+            alpha = alpha,
+        }
+    end
+    local first = st(HIT_SIDE, WHITE, 0)
+    first.material = mat
+    local x = LUI.UIImage.new(first)
+    x:registerAnimationState("pop_hit", st(HIT_SIDE * 1.38, WHITE, 1))
+    x:registerAnimationState("hit", st(HIT_SIDE, WHITE, 1))
+    x:registerAnimationState("pop_kill", st(HIT_SIDE * 1.5, HIT_RED, 1))
+    x:registerAnimationState("kill", st(HIT_SIDE * 1.12, HIT_RED, 1))
+    x:registerAnimationState("off_hit", st(HIT_SIDE, WHITE, 0))
+    x:registerAnimationState("off_kill", st(HIT_SIDE * 1.12, HIT_RED, 0))
+    root:addElement(x)
+
+    local shown_at, kind = nil, nil
+    root:registerOmnvarHandler("damage_feedback", function(_, event)
+        local ok, err = pcall(function()
+            local v = type(event) == "table" and event.value or nil
+            if v == nil then
+                v = try(nil, Game.GetOmnvar, "damage_feedback")
+            end
+            if v == nil or v == "" or v == 0 then
+                return
+            end
+            local s = tostring(v)
+            local kill = string.find(s, "killshot", 1, true) ~= nil
+            -- (A hit just after the kill's X keeps it red.)
+            if not kill and kind == "kill" and shown_at and now_ms(0) - shown_at < 120 then
+                return
+            end
+            kind = kill and "kill" or "hit"
+            shown_at = now_ms(0)
+            x:animateToState("pop_" .. kind, 0)
+            x:animateToState(kind, 70)
+        end)
+        if not ok then
+            log("hit marker: " .. tostring(err))
+        end
+    end)
+    every(root, 30, "claude_hud_hit", function()
+        if shown_at then
+            local life = kind == "kill" and 420 or 300
+            local age = now_ms(30) - shown_at
+            if age >= 80 then
+                x:animateToState("off_" .. kind, math.max(60, life - 80))
+                shown_at = nil
+            end
+        end
+    end)
+    return root
+end
+
+----------------------------------------------------------------------------
+-- Top left: the minimap (hud_modern.rs), square-cornered on our dark
+-- ground with a thin edge, the compass tape on a dark strip along its top.
+-- The map, its marks and the tape are still H1's own (the engine draws
+-- them); only what is round them changes. H1's backing becomes our ground
+-- (claude_ui's material rules).
+----------------------------------------------------------------------------
+
+local function wrap_minimap()
+    local builders = LUI.MenuBuilder and LUI.MenuBuilder.m_types_build
+    local stock = builders and builders.minimapHudDef
+    if not stock then
+        log("no minimapHudDef: left as it is")
+        return
+    end
+    builders.minimapHudDef = function(...)
+        local mb = LUI.MenuBuilder
+        local orig_add = mb.BuildAddChild
+        mb.BuildAddChild = function(parent, def, ...)
+            pcall(function()
+                if type(def) == "table" and def.type == "UICompass" and def.states and def.states.default then
+                    -- The tape's strip, under the tape.
+                    local g = geometry(def.states.default)
+                    g.material = white()
+                    g.color = PANEL
+                    g.alpha = 0.82
+                    parent:addElement(LUI.UIImage.new(g))
+                end
+            end)
+            return orig_add(parent, def, ...)
+        end
+        local ok, root = pcall(stock, ...)
+        mb.BuildAddChild = orig_add
+        if not ok then
+            error(root)
+        end
+        pcall(function()
+            local map = root:getFirstDescendentById("minimap")
+            if map then
+                edge(map, EDGE, 0.78, 1)
+            end
+            local tape = root:getFirstDescendentById("minimapCompass")
+            if tape then
+                -- The accent under the tape.
+                tape:addElement(rect({ topAnchor = false, bottomAnchor = true, leftAnchor = true, rightAnchor = true, bottom = 0, height = 1, left = 0, right = 0 }, BLUE, 0.7))
+            end
+        end)
+        return root
+    end
+end
+
+----------------------------------------------------------------------------
 -- Wrapping H1's widget builders.
 ----------------------------------------------------------------------------
 
@@ -608,6 +1187,16 @@ local function wrap(type_name, build_ours)
     end
 end
 
-wrap("weaponInfoHudDef", build_weapon_hud)
+wrap("weaponInfoHudDef", function()
+    local root = build_weapon_hud()
+    local ok, err = pcall(add_streak_column, root)
+    if not ok then
+        log("streaks: " .. tostring(err))
+    end
+    return root
+end)
 wrap("teamScoresHudDef", build_score_hud)
+wrap("obituary", build_feed)
+wrap("damageFeedbackHudDef", build_hitmarker)
+pcall(wrap_minimap)
 log("loaded")
