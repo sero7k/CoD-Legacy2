@@ -5,6 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-2022
@@ -20,10 +23,28 @@ jobs:
         run: tools\premake5.exe vs2022
 
       - name: Build (Release x64)
-        run: msbuild /m /v:minimal /p:Configuration=Release /p:Platform=x64 build\hmw-mod.sln
+        id: build
+        continue-on-error: true
+        shell: cmd
+        run: msbuild /m /v:minimal /p:Configuration=Release /p:Platform=x64 build\hmw-mod.sln > build.log 2>&1
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: CodLegacy
-          path: build\bin\x64\Release\CodLegacy.exe
-          if-no-files-found: error
+      # The exe and the build log go to the build-output branch (one commit,
+      # replaced each time), so they can be fetched with plain git.
+      - name: Publish to the build-output branch
+        shell: bash
+        run: |
+          mkdir -p out
+          cp build.log out/build.log
+          if [ -f build/bin/x64/Release/CodLegacy.exe ]; then cp build/bin/x64/Release/CodLegacy.exe out/; fi
+          echo "${{ steps.build.outcome }} ${GITHUB_SHA}" > out/STATUS
+          cd out
+          git init -q
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Build of ${GITHUB_SHA}: ${{ steps.build.outcome }}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" HEAD:build-output
+
+      - name: Fail if the build failed
+        if: steps.build.outcome != 'success'
+        run: exit 1
