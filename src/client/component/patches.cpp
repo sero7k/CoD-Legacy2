@@ -424,14 +424,15 @@ namespace patches
 		
 		void* ui_init_stub()
 		{
-			std::array<std::string, 7> zones
+			// (hmw_launcher is left out: HMW 1.5.0 ships it as a 64-byte
+			// placeholder, and loading it stops the game with a disc read error.)
+			std::array<std::string, 6> zones
 			{
 				"hmw_killstreak",
 				"hmw_attachments",
 				"hmw_ar1",
 				"hmw_smg",
 				"hmw_shotgun",
-				"hmw_launcher",
 				"hmw_rangers"
 			};
 
