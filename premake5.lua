@@ -259,7 +259,8 @@ filter "configurations:Release"
 	buildoptions {"/GL"}
 	linkoptions { "/IGNORE:4702", "/LTCG" }
 	defines {"NDEBUG"}
-	flags {"FatalCompileWarnings"}
+	-- (Warnings are not errors: newer MSVC warns where the one HMW was built
+	-- with did not, C4244 / C4505 / C4127 ...)
 filter {}
 
 filter "configurations:Debug"
