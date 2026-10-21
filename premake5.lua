@@ -298,7 +298,7 @@ project "client"
 kind "ConsoleApp"
 language "C++"
 
-targetname "hmw-mod"
+targetname "CodLegacy"
 
 pchheader "std_include.hpp"
 pchsource "src/client/std_include.cpp"

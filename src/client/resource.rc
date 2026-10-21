@@ -77,7 +77,7 @@ BEGIN
             VALUE "LegalCopyright", "Copyright © 2024 HorizonMW. All rights reserved."
             VALUE "Licence", "GPLv3"
             VALUE "Info", "https://h2m-mod.dev"
-            VALUE "OriginalFilename", "hmw-mod.exe"
+            VALUE "OriginalFilename", "CodLegacy.exe"
             VALUE "ProductName", "hmw-mod"
             VALUE "ProductVersion", VERSION_PRODUCT
         END
