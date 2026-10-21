@@ -118,6 +118,8 @@ ICON_IMAGE            RCDATA "resources/icon.png"
 
 LUI_COMMON            RCDATA "resources/ui_scripts/common.lua"
 
+CLAUDE_HUD            RCDATA "resources/ui_scripts/claude_hud.lua"
+
 LUA_JSON              RCDATA "resources/json.lua"
 
 DVAR_LIST             RCDATA "resources/dvar_list.json"

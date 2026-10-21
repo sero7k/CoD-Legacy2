@@ -12,8 +12,13 @@
 --
 -- Turn it off by deleting this folder (ui_scripts/claude_hud).
 
-if game:issingleplayer() or not Engine.IsMultiplayer() then
-    return
+do
+    local ok, mp = pcall(function()
+        return Engine.IsMultiplayer()
+    end)
+    if not ok or not mp then
+        return
+    end
 end
 
 local log = function(msg)

@@ -54,6 +54,7 @@ namespace ui_scripting
 		utils::hook::detour hks_load_hook;
 
 		const auto lui_common = utils::nt::load_resource(LUI_COMMON);
+		const auto claude_hud = utils::nt::load_resource(CLAUDE_HUD);
 
 		struct globals_t
 		{
@@ -643,6 +644,10 @@ namespace ui_scripting
 
 				load_script(rawfile_name, buffer);
 			}
+
+			// Our in-match HUD (score bar, ammo box, name and health), after
+			// the game's own scripts so it can wrap their HUD widgets.
+			load_script("claude_hud", claude_hud);
 		}
 
 		void try_start()
