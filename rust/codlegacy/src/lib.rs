@@ -34,5 +34,6 @@ pub extern "C" fn codlegacy_add(a: i32, b: i32, out: *mut i32) -> bool {
 
 pub mod host;
 pub mod menu;
+pub mod settings;
 pub mod music;
 pub mod ui;

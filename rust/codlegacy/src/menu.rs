@@ -1,7 +1,7 @@
 //! The Legacy menu: a panel over the game in the BO2 rebuild's front-end look
 //! (near-black navy panels, one blue accent, white text that dims when it is
 //! not in focus). It lists every map in `hmw-usermaps` to launch, and holds
-//! the options that are ours (music volume). It does not replace H1's own
+//! the settings MWR asks for (controls, graphics, audio, gameplay). It does not replace H1's own
 //! menus: `legacy_menu` opens it from the console or a bind, and while it is
 //! open it takes the arrow keys, Enter and Escape.
 
@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::host;
+use crate::settings::{Setting, CATEGORIES};
 use crate::ui::{Engine, Surface, UiApi};
 
 // The rebuild's shell palette (crates/ui/src/shell/theme.rs).
@@ -20,7 +21,6 @@ const FAINT: [f32; 4] = [0.80, 0.84, 0.90, 0.32];
 const PANEL: [f32; 4] = [0.025, 0.04, 0.07, 0.82];
 const LINE: [f32; 4] = [0.70, 0.80, 0.95, 0.14];
 
-const VOLUME_DVAR: &str = "legacy_music_volume";
 const VISIBLE_ROWS: usize = 13;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,6 +52,7 @@ enum Screen {
     Main,
     Maps,
     Options,
+    Category(usize),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -124,12 +125,14 @@ pub struct Menu {
     screen: Screen,
     cursor: usize,
     maps: Vec<MapEntry>,
-    volume: f32,
+    values: Vec<String>,
+    /// Cursor to return to on the category list.
+    category_cursor: usize,
 }
 
 impl Default for Menu {
     fn default() -> Self {
-        Self { open: false, screen: Screen::Main, cursor: 0, maps: Vec::new(), volume: 0.6 }
+        Self { open: false, screen: Screen::Main, cursor: 0, maps: Vec::new(), values: Vec::new(), category_cursor: 0 }
     }
 }
 
@@ -152,7 +155,8 @@ impl Menu {
         match self.screen {
             Screen::Main => MAIN_ROWS.len(),
             Screen::Maps => self.maps.len(),
-            Screen::Options => 1,
+            Screen::Options => CATEGORIES.len(),
+            Screen::Category(c) => CATEGORIES[c].settings.len(),
         }
     }
 
@@ -161,18 +165,29 @@ impl Menu {
         self.cursor = 0;
         match screen {
             Screen::Maps => self.maps = scan_maps(&usermaps_dir()),
+            Screen::Category(c) => {
+                self.values = CATEGORIES[c]
+                    .settings
+                    .iter()
+                    .map(|st| host::dvar(st.dvar).unwrap_or_default())
+                    .collect();
+            }
             Screen::Options => {
-                if let Some(v) = host::dvar(VOLUME_DVAR).and_then(|s| s.trim().parse::<f32>().ok()) {
-                    self.volume = v.clamp(0.0, 1.0);
-                }
+                self.cursor = self.category_cursor.min(CATEGORIES.len() - 1);
             }
             Screen::Main => {}
         }
     }
 
-    fn set_volume(&mut self, volume: f32) {
-        self.volume = ((volume * 20.0).round() / 20.0).clamp(0.0, 1.0);
-        host::exec(&format!("set {VOLUME_DVAR} {:.2}", self.volume));
+    fn change(&mut self, dir: i32) {
+        let Screen::Category(c) = self.screen else { return };
+        let Some(st) = CATEGORIES[c].settings.get(self.cursor) else { return };
+        let now = self.values.get(self.cursor).map(String::as_str).unwrap_or("");
+        let next = st.step(now, dir);
+        host::exec(&format!("seta {} {}", st.dvar, next));
+        if let Some(v) = self.values.get_mut(self.cursor) {
+            *v = next;
+        }
     }
 
     /// Handles a key; returns whether the menu took it (always, while open).
@@ -186,11 +201,12 @@ impl Menu {
             Key::Down if n > 0 => self.cursor = (self.cursor + 1) % n,
             Key::Back => match self.screen {
                 Screen::Main => self.open = false,
+                Screen::Category(_) => self.go(Screen::Options),
+                Screen::Category(_) => self.go(Screen::Options),
                 _ => self.go(Screen::Main),
             },
-            Key::Left | Key::Right if self.screen == Screen::Options => {
-                let step = if key == Key::Left { -0.05 } else { 0.05 };
-                self.set_volume(self.volume + step);
+            Key::Left | Key::Right if matches!(self.screen, Screen::Category(_)) => {
+                self.change(if key == Key::Left { -1 } else { 1 });
             }
             Key::Enter => match (self.screen, self.cursor) {
                 (Screen::Main, 0) => self.go(Screen::Maps),
@@ -202,7 +218,11 @@ impl Menu {
                         self.open = false;
                     }
                 }
-                (Screen::Options, _) => {}
+                (Screen::Options, i) => {
+                    self.category_cursor = i;
+                    self.go(Screen::Category(i));
+                }
+                (Screen::Category(_), _) => self.change(1),
             },
             _ => {}
         }
@@ -224,6 +244,7 @@ impl Menu {
             Screen::Main => "COD LEGACY",
             Screen::Maps => "MAPS",
             Screen::Options => "OPTIONS",
+            Screen::Category(c) => CATEGORIES[c].name,
         };
         s.text(title, px + 34.0 * k, py + 70.0 * k, (46.0 * k) as i32, TEXT);
         if self.screen == Screen::Maps {
@@ -256,15 +277,23 @@ impl Menu {
                     let iw = s.width(&m.id, id_size);
                     s.text(&m.id, px + pw - 34.0 * k - iw, base - 2.0 * k, id_size, FAINT);
                 }
-                Screen::Options => {
-                    s.text("MUSIC VOLUME", px + 40.0 * k, base, size, colour);
-                    let (bx, bw, bh) = (px + pw - 34.0 * k - 190.0 * k, 190.0 * k, 8.0 * k);
-                    let by = y + row_h * 0.5 - bh / 2.0;
-                    s.fill(bx, by, bw, bh, [0.0, 0.0, 0.0, 0.45]);
-                    s.fill(bx, by, bw * self.volume, bh, ACCENT);
-                    let pct = format!("{}", (self.volume * 100.0).round() as i32);
-                    let pw_ = s.width(&pct, (20.0 * k) as i32);
-                    s.text(&pct, bx - 14.0 * k - pw_, base, (20.0 * k) as i32, colour);
+                Screen::Options => s.text(CATEGORIES[i].name, px + 40.0 * k, base, size, colour),
+                Screen::Category(c) => {
+                    let st: &Setting = &CATEGORIES[c].settings[i];
+                    s.text(st.label, px + 40.0 * k, base, size, colour);
+                    let cur = self.values.get(i).map(String::as_str).unwrap_or("");
+                    let (text, fill) = st.show(cur);
+                    let tsize = (22.0 * k) as i32;
+                    let mut right = px + pw - 34.0 * k;
+                    if let Some(f) = fill {
+                        let (bw, bh) = (150.0 * k, 8.0 * k);
+                        let by = y + row_h * 0.5 - bh / 2.0;
+                        s.fill(right - bw, by, bw, bh, [0.0, 0.0, 0.0, 0.45]);
+                        s.fill(right - bw, by, bw * f.clamp(0.0, 1.0), bh, ACCENT);
+                        right -= bw + 14.0 * k;
+                    }
+                    let tw = s.width(&text, tsize);
+                    s.text(&text, right - tw, base, tsize, if on { ACCENT } else { colour });
                 }
             }
         }
@@ -273,7 +302,8 @@ impl Menu {
         }
         let hint = match self.screen {
             Screen::Main | Screen::Maps => "UP/DOWN  SELECT      ENTER  CHOOSE      ESC  BACK",
-            Screen::Options => "LEFT/RIGHT  ADJUST      ESC  BACK",
+            Screen::Options => "UP/DOWN  SELECT      ENTER  OPEN      ESC  BACK",
+            Screen::Category(_) => "LEFT/RIGHT  ADJUST      ESC  BACK",
         };
         s.text(hint, px + 34.0 * k, py + ph - 26.0 * k, (18.0 * k) as i32, FAINT);
     }
@@ -425,19 +455,27 @@ mod tests {
     }
 
     #[test]
-    fn volume_steps_by_five_percent_and_stays_in_range() {
+    fn a_category_lists_its_settings_and_adjusting_changes_the_row() {
         let mut m = Menu::default();
         m.toggle();
         m.screen = Screen::Options;
-        m.volume = 0.98;
-        m.key(Key::Right);
-        assert_eq!(m.volume, 1.0);
-        for _ in 0..30 {
-            m.key(Key::Left);
+        m.key(Key::Down); // GRAPHICS
+        m.key(Key::Enter);
+        assert_eq!(m.screen, Screen::Category(1));
+        m.values = vec!["1".into(); CATEGORIES[1].settings.len()];
+        m.key(Key::Enter); // fullscreen toggle
+        assert_eq!(m.values[0], "0");
+        m.key(Key::Down);
+        m.key(Key::Left); // vsync
+        assert_eq!(m.values[1], "0");
+        let mut r = Rec::default();
+        m.draw(&mut r, 1920.0, 1080.0);
+        for want in ["GRAPHICS", "FULLSCREEN", "VSYNC", "OFF"] {
+            assert!(r.texts.iter().any(|t| t == want), "missing {want}: {:?}", r.texts);
         }
-        assert_eq!(m.volume, 0.0);
-        m.key(Key::Right);
-        assert!((m.volume - 0.05).abs() < 1e-6);
+        m.key(Key::Back);
+        assert_eq!(m.screen, Screen::Options);
+        assert_eq!(m.cursor, 1);
     }
 
     #[test]
