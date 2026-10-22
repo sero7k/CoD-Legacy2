@@ -6,6 +6,8 @@
 #include "filesystem.hpp"
 #include "console.hpp"
 
+#include <algorithm>
+#include <set>
 #include <utils/hook.hpp>
 #include <utils/io.hpp>
 #include <utils/memory.hpp>
@@ -51,6 +53,96 @@ namespace arena
 			return true;
 		}
 
+		std::string lower(std::string s)
+		{
+			std::ranges::transform(s, s.begin(), [](const unsigned char c) { return static_cast<char>(std::tolower(c)); });
+			return s;
+		}
+
+		// Whether an arena for this map is already in the list (info strings
+		// are "\key\value" pairs).
+		bool arena_loaded(const std::string& map)
+		{
+			const auto needle = "\\map\\" + lower(map);
+			for (auto i = 0; i < *game::ui_num_arenas; i++)
+			{
+				const char* info = game::ui_arena_infos[i];
+				if (!info)
+				{
+					continue;
+				}
+
+				const auto text = lower(info);
+				const auto at = text.find(needle);
+				if (at == std::string::npos)
+				{
+					continue;
+				}
+
+				const auto end = at + needle.size();
+				if (end == text.size() || text[end] == '\\')
+				{
+					return true;
+				}
+			}
+
+			return false;
+		}
+
+		bool is_map_name(const std::string& name)
+		{
+			return !name.empty() && std::ranges::all_of(name, [](const unsigned char c)
+			{
+				return std::isalnum(c) || c == '_';
+			});
+		}
+
+		// The folder names under hmw-usermaps in every search path, sorted.
+		std::vector<std::string> list_usermaps()
+		{
+			std::set<std::string> names;
+			for (const auto& search_path : filesystem::get_search_paths())
+			{
+				std::error_code ec{};
+				for (const auto& entry : std::filesystem::directory_iterator(
+					     std::filesystem::path(search_path) / "hmw-usermaps", ec))
+				{
+					std::error_code entry_ec{};
+					if (!entry.is_directory(entry_ec))
+					{
+						continue;
+					}
+
+					const auto name = entry.path().filename().string();
+					if (is_map_name(name))
+					{
+						names.insert(name);
+					}
+				}
+			}
+
+			return {names.begin(), names.end()};
+		}
+
+		void load_usermap_arena(const std::string& map, const bool report = true)
+		{
+			if (arena_loaded(map))
+			{
+				return;
+			}
+
+			if (*game::ui_num_arenas >= MAX_ARENAS)
+			{
+				console::warn("[arena] map selection is full (%d): %s not listed\n", MAX_ARENAS, map.data());
+				return;
+			}
+
+			if (!parse_arena("hmw-usermaps/" + map + "/" + map + ".arena") && report)
+			{
+				console::warn("[arena] no arena file for usermap %s\n", map.data());
+			}
+		}
+
 		void load_arenas_stub()
 		{
 			*game::ui_num_arenas = 0;
@@ -58,13 +150,19 @@ namespace arena
 
 			parse_arena("mp/basemaps.arena");
 
-			// read usermap arena from disk
+			// the map being played first, so its arena is never the one left out
+			// if the list runs out of room
 			const auto mapname = game::Dvar_FindVar("ui_mapname");
-			if (mapname && mapname->current.string)
+			if (mapname && mapname->current.string && *mapname->current.string)
 			{
-				const auto usermap_path = "hmw-usermaps/"s + mapname->current.string;
-				const auto arena_path = usermap_path + "/" + mapname->current.string + ".arena";
-				parse_arena(arena_path);
+				load_usermap_arena(mapname->current.string, false);
+			}
+
+			// then every usermap on disk: each folder in hmw-usermaps is a map
+			// in the map selection
+			for (const auto& name : list_usermaps())
+			{
+				load_usermap_arena(name);
 			}
 		}
 	}
