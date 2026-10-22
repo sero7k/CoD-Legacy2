@@ -2,11 +2,11 @@
 -- (rust/codlegacy/src/ui.rs, through the engine's 2D commands). This script
 -- only reads the game's values and hands them to Rust (game:rustset), and
 -- hides H1's own HUD widgets that Rust replaces:
---   weaponInfoHudDef     -> gun name, ammo, health, his name
+--   weaponInfoHudDef     -> gun name, ammo, health, his name, scorestreaks
 --   teamScoresHudDef     -> scores, clock, team names, score limit
 --   obituary             -> the kill feed
 --   damageFeedbackHudDef -> the hit marker
--- Everything else of H1's HUD (minimap, scorestreaks, splashes, the
+-- Everything else of H1's HUD (minimap, splashes, the
 -- scoreboard) is left alone. Each stock widget stays in the tree, hidden, so
 -- whatever H1 sends it still lands, and H1 still hides the HUD in menus, the
 -- killcam and when the HUD is off. Every call into the game is guarded: if
@@ -138,6 +138,42 @@ local function clip_ammo()
     return nil
 end
 
+-- His scorestreaks (H1's ks_icon_1..3 omnvars, ks_hasStreak's bits), as
+-- "material:earned" for Rust.
+local function streak_material(idx)
+    local tbl = KillstreakTable
+    if type(tbl) ~= "table" or not tbl.Cols then
+        return nil
+    end
+    local name = try("", Engine.TableLookup, tbl.File, tbl.Cols.Index, tostring(idx), tbl.Cols.EarnedIcon)
+    if type(name) ~= "string" or name == "" or name == "specialty_ks_null" then
+        return nil
+    end
+    return name
+end
+
+local function has_streak(i)
+    local bits = try(0, Game.GetOmnvar, "ks_hasStreak")
+    if type(bits) ~= "number" then
+        return false
+    end
+    return math.floor(bits / (2 ^ i)) % 2 == 1
+end
+
+local function push_streaks()
+    local slots = {}
+    for i = 1, 3 do
+        local idx = try(0, Game.GetOmnvar, "ks_icon_" .. i)
+        local mat = type(idx) == "number" and idx > 0 and streak_material(idx) or nil
+        if mat then
+            table.insert(slots, mat:gsub("[,:|]", "_") .. ":" .. (has_streak(i) and "1" or "0"))
+        else
+            table.insert(slots, "-")
+        end
+    end
+    push("streaks", table.concat(slots, ","))
+end
+
 local function build_weapon_hud()
     local root = fullscreen()
     local function update()
@@ -161,6 +197,7 @@ local function build_weapon_hud()
         push("health", health)
     end
     every(root, 50, "claude_hud_weapon", update)
+    every(root, 250, "claude_hud_streaks", push_streaks)
     root:registerEventHandler("weapon_change", function()
         pcall(update)
     end)

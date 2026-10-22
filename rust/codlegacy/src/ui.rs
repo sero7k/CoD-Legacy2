@@ -21,6 +21,7 @@
 //! | `clock`    | ms left (empty: none)                                       |
 //! | `feed`     | a kill feed row: parts joined by `\|`, each `T:rrggbb:text` or `I:material` |
 //! | `hit`      | `hit` or `kill`: the hit marker                              |
+//! | `streaks`  | his three scorestreaks, cheapest first: `material:1` (earned) / `material:0`, `-` for none, joined by `,` |
 
 use std::collections::HashMap;
 use std::ffi::{c_char, CStr, CString};
@@ -180,6 +181,7 @@ impl Hud {
         let k = h / 1080.0;
         self.draw_scores(s, w, k);
         self.draw_gun(s, w, h, k);
+        self.draw_streaks(s, w, h, k);
         self.draw_feed(s, h, k, now);
         self.draw_hit(s, w, h, k, now);
     }
@@ -287,6 +289,37 @@ impl Hud {
         s.fill(bx, by, bw, bh, TRACK);
         if health > 0.0 {
             s.fill(bx, by, (bw * health / 100.0).round(), bh, if health <= 35.0 { RED } else { WHITE });
+        }
+    }
+
+    /// Over the gun's name on the right edge: his scorestreaks in a column of
+    /// squares, the dearest at the top, an earned one lit in blue.
+    fn draw_streaks(&self, s: &mut dyn Surface, w: f32, h: f32, k: f32) {
+        const SIDE: f32 = 56.0;
+        const GAP: f32 = 3.0;
+        const RIGHT: f32 = 22.0;
+        const BASE: f32 = 26.0 + 54.0 + 2.0 + 26.0 + 4.0;
+        for (i, slot) in self.get("streaks").split(',').take(3).enumerate() {
+            let Some((material, ready)) = slot.rsplit_once(':') else { continue };
+            if material.is_empty() || material == "-" {
+                continue;
+            }
+            let ready = ready == "1";
+            let side = SIDE * k;
+            let x = w - RIGHT * k - side;
+            let y = h - (BASE + i as f32 * (SIDE + GAP)) * k - side;
+            s.fill(x, y, side, side, PANEL);
+            if ready {
+                s.fill(x, y, side, side, with_alpha(BLUE, 0.3));
+            }
+            let inner = side * 0.74;
+            s.image(material, x + (side - inner) / 2.0, y + (side - inner) / 2.0, inner, inner, with_alpha(WHITE, if ready { 1.0 } else { 0.42 }));
+            let edge = if ready { BLUE } else { with_alpha(WHITE, 0.16) };
+            let t = k.max(1.0);
+            s.fill(x, y, side, t, edge);
+            s.fill(x, y + side - t, side, t, edge);
+            s.fill(x, y, t, side, edge);
+            s.fill(x + side - t, y, t, side, edge);
         }
     }
 
@@ -508,6 +541,16 @@ mod tests {
         h.set("hit", "kill", t0);
         h.set("hit", "hit", t0 + Duration::from_millis(50));
         assert!(matches!(h.hit, Some((_, true))));
+    }
+
+    #[test]
+    fn streaks_draw_their_icons_lit_when_earned() {
+        let t0 = Instant::now();
+        let mut h = up_hud(t0);
+        h.set("streaks", "radar_icon:1,-,heli_icon:0", t0);
+        let mut r = Recorder::default();
+        h.draw(&mut r, 1920.0, 1080.0, t0);
+        assert_eq!(r.images, vec!["radar_icon", "heli_icon"]);
     }
 
     #[test]
