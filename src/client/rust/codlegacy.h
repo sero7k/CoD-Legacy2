@@ -28,6 +28,13 @@ extern "C"
 {
 	bool codlegacy_init(const codlegacy_host_api* api);
 
+	// The music (rust/codlegacy/src/music): what the game is doing (0 silent,
+	// 1 menu, 2 lobby, 3 match; the first call starts the music thread) and
+	// how loud (0..1).
+	void codlegacy_music_context(int context);
+	void codlegacy_music_volume(float volume);
+	void codlegacy_music_stop();
+
 	const char* codlegacy_version();
 	float codlegacy_bo2_sprint_speed_scale();
 	bool codlegacy_add(int a, int b, int* out);

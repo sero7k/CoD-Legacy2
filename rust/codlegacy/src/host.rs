@@ -27,7 +27,7 @@ fn host() -> Option<HostApi> {
 }
 
 /// Hands the engine callbacks to the Rust core. Returns false for a null table.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn codlegacy_init(api: *const HostApi) -> bool {
     // SAFETY: a non-null `api` points to a table that is valid for the call;
     // it is copied, not kept.

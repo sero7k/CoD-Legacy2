@@ -391,7 +391,7 @@ fn with_hud<R>(f: impl FnOnce(&mut Hud) -> R) -> R {
 
 /// Takes one value for the HUD (see the module's table). Strings are borrowed
 /// for the call; a null one is ignored.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn codlegacy_ui_set(key: *const c_char, value: *const c_char) {
     if key.is_null() || value.is_null() {
         return;
@@ -405,7 +405,7 @@ pub extern "C" fn codlegacy_ui_set(key: *const c_char, value: *const c_char) {
 /// Draws the HUD for one frame of a `width` x `height` screen with the
 /// engine's drawing functions in `api` (null: nothing). Returns whether the
 /// HUD was up and drawn.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn codlegacy_ui_frame(api: *const UiApi, width: f32, height: f32) -> bool {
     // SAFETY: a non-null `api` points to a table that lives for the call.
     let Some(api) = (unsafe { api.as_ref() }) else { return false };

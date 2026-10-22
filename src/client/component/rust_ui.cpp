@@ -6,6 +6,7 @@
 #include "command.hpp"
 
 #include "game/game.hpp"
+#include "game/dvars.hpp"
 
 #include "rust/codlegacy.h"
 
@@ -154,6 +155,39 @@ namespace rust_ui
 			return true;
 		}
 
+		game::dvar_t* music_volume_dvar;
+
+		// 0 silent (loading), 1 menu, 3 match; sent to Rust when it changes.
+		int music_context()
+		{
+			if (*game::client_state != nullptr && game::CL_IsCgameInitialized() && !game::VirtualLobby_Loaded())
+			{
+				return 3;
+			}
+
+			return game::VirtualLobby_Loaded() ? 1 : 0;
+		}
+
+		void update_music()
+		{
+			static int last_context = -1;
+			static float last_volume = -1.0f;
+
+			const auto context = music_context();
+			if (context != last_context)
+			{
+				last_context = context;
+				codlegacy_music_context(context);
+			}
+
+			const auto volume = music_volume_dvar ? music_volume_dvar->current.value : 0.0f;
+			if (volume != last_volume)
+			{
+				last_volume = volume;
+				codlegacy_music_volume(volume);
+			}
+		}
+
 		void draw_hud()
 		{
 			if (!game::CL_IsCgameInitialized() || game::VirtualLobby_Loaded() || *game::client_state == nullptr)
@@ -170,6 +204,11 @@ namespace rust_ui
 	class component final : public component_interface
 	{
 	public:
+		void pre_destroy() override
+		{
+			codlegacy_music_stop();
+		}
+
 		void post_unpack() override
 		{
 			if (game::environment::is_dedi() || !game::environment::is_mp())
@@ -179,6 +218,10 @@ namespace rust_ui
 
 			static const codlegacy_host_api host{host_log, host_exec, host_dvar_string};
 			codlegacy_init(&host);
+
+			music_volume_dvar = dvars::register_float("legacy_music_volume", 0.6f, 0.0f, 1.0f, game::DVAR_FLAG_SAVED,
+				"CoD Legacy's music volume (music/menu, music/lobby, music/match beside the exe)");
+			scheduler::loop(update_music, scheduler::pipeline::async, 250ms);
 
 			scheduler::loop(draw_hud, scheduler::pipeline::renderer);
 		}
