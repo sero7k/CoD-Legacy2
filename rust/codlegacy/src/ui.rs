@@ -47,7 +47,7 @@ pub trait Surface {
     fn image(&mut self, material: &str, x: f32, y: f32, w: f32, h: f32, c: [f32; 4]);
 }
 
-struct Engine<'a>(&'a UiApi);
+pub(crate) struct Engine<'a>(pub(crate) &'a UiApi);
 
 fn cstring(s: &str) -> CString {
     CString::new(s.replace('\0', " ")).unwrap_or_default()

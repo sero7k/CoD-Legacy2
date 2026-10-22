@@ -4,6 +4,7 @@
 #include "game/game.hpp"
 
 #include "game_console.hpp"
+#include "rust/codlegacy.h"
 #include "gui/gui.hpp"
 #include "game/ui_scripting/execution.hpp"
 
@@ -24,6 +25,12 @@ namespace input
 				return;
 			}
 
+			// the Legacy menu (Rust) swallows typing while it is open
+			if (codlegacy_menu_is_open())
+			{
+				return;
+			}
+
 #ifdef DEBUG
 			if (!gui::gui_char_event(local_client_num, key))
 			{
@@ -37,6 +44,13 @@ namespace input
 		void cl_key_event_stub(const int local_client_num, const int key, const int down)
 		{
 			if (!game_console::console_key_event(local_client_num, key, down))
+			{
+				return;
+			}
+
+			// the Legacy menu (Rust) takes every key going down while it is
+			// open; key-ups still reach the game so no key sticks
+			if (down && codlegacy_menu_key(key))
 			{
 				return;
 			}

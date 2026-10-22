@@ -35,6 +35,13 @@ extern "C"
 	void codlegacy_music_volume(float volume);
 	void codlegacy_music_stop();
 
+	// The Legacy menu (rust/codlegacy/src/menu.rs): an overlay over the game.
+	void codlegacy_menu_toggle();
+	bool codlegacy_menu_is_open();
+	// An engine key going down; true when the menu took it.
+	bool codlegacy_menu_key(int code);
+	void codlegacy_menu_frame(const codlegacy_ui_api* api, float width, float height);
+
 	const char* codlegacy_version();
 	float codlegacy_bo2_sprint_speed_scale();
 	bool codlegacy_add(int a, int b, int* out);

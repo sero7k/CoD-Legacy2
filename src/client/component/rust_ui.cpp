@@ -188,6 +188,18 @@ namespace rust_ui
 			}
 		}
 
+		void draw_menu()
+		{
+			if (!codlegacy_menu_is_open())
+			{
+				return;
+			}
+
+			static const codlegacy_ui_api api{fill_rect, draw_text, text_width, draw_image};
+			const auto* place = game::ScrPlace_GetViewPlacement();
+			codlegacy_menu_frame(&api, place->realViewportSize[0], place->realViewportSize[1]);
+		}
+
 		void draw_hud()
 		{
 			if (!game::CL_IsCgameInitialized() || game::VirtualLobby_Loaded() || *game::client_state == nullptr)
@@ -223,7 +235,13 @@ namespace rust_ui
 				"CoD Legacy's music volume (music/menu, music/lobby, music/match beside the exe)");
 			scheduler::loop(update_music, scheduler::pipeline::async, 250ms);
 
+			command::add("legacy_menu", []()
+			{
+				codlegacy_menu_toggle();
+			});
+
 			scheduler::loop(draw_hud, scheduler::pipeline::renderer);
+			scheduler::loop(draw_menu, scheduler::pipeline::renderer);
 		}
 	};
 }
