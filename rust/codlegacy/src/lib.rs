@@ -31,3 +31,5 @@ pub extern "C" fn codlegacy_add(a: i32, b: i32, out: *mut i32) -> bool {
     unsafe { *out = a.saturating_add(b) };
     true
 }
+
+pub mod ui;

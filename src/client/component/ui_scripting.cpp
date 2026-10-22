@@ -56,7 +56,6 @@ namespace ui_scripting
 		utils::hook::detour hks_load_hook;
 
 		const auto lui_common = utils::nt::load_resource(LUI_COMMON);
-		const auto claude_ui = utils::nt::load_resource(CLAUDE_UI);
 		const auto claude_hud = utils::nt::load_resource(CLAUDE_HUD);
 
 		struct globals_t
@@ -236,6 +235,13 @@ namespace ui_scripting
 			{
 				int sum = 0;
 				return codlegacy_add(a, b, &sum) ? sum : 0;
+			};
+
+			// The in-match HUD Rust draws (rust/codlegacy/src/ui.rs): Lua pushes
+			// each value as text.
+			game_type["rustset"] = [](const game&, const std::string& key, const std::string& value)
+			{
+				codlegacy_ui_set(key.c_str(), value.c_str());
 			};
 
 			game_type["claudelog"] = [](const game&, const std::string& line)
@@ -672,10 +678,8 @@ namespace ui_scripting
 				load_script(rawfile_name, buffer);
 			}
 
-			// Our look over H1's menus and HUD boxes (palette, menu rows,
-			// shade, logo), then our in-match HUD; after the game's own
-			// scripts so they can wrap their menus and HUD widgets.
-			load_script("claude_ui", claude_ui);
+			// The feed for the HUD Rust draws, after the game's own scripts so
+			// it can wrap their HUD widgets. H1's menus are left as they are.
 			load_script("claude_hud", claude_hud);
 		}
 
