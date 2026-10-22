@@ -2,6 +2,8 @@
 #include "loader/component_loader.hpp"
 
 #include "scheduler.hpp"
+#include "console.hpp"
+#include "command.hpp"
 
 #include "game/game.hpp"
 
@@ -98,6 +100,60 @@ namespace rust_ui
 			game::R_AddCmdDrawStretchPic(x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f, color, mat);
 		}
 
+		void host_log(const char* line)
+		{
+			console::info("%s", line ? line : "");
+		}
+
+		void host_exec(const char* command)
+		{
+			if (command && *command)
+			{
+				command::execute(command);
+			}
+		}
+
+		bool host_dvar_string(const char* name, char* out, const size_t cap)
+		{
+			if (!name || !out || cap == 0)
+			{
+				return false;
+			}
+
+			out[0] = '\0';
+			const auto* dvar = game::Dvar_FindVar(name);
+			if (!dvar)
+			{
+				return false;
+			}
+
+			std::string text;
+			switch (dvar->type)
+			{
+			case game::dvar_type::boolean:
+			case game::dvar_type::boolean_hashed:
+				text = dvar->current.enabled ? "1" : "0";
+				break;
+			case game::dvar_type::integer:
+			case game::dvar_type::integer_hashed:
+			case game::dvar_type::enumeration:
+				text = std::to_string(dvar->current.integer);
+				break;
+			case game::dvar_type::value:
+			case game::dvar_type::value_hashed:
+				text = std::to_string(dvar->current.value);
+				break;
+			case game::dvar_type::string:
+				text = dvar->current.string ? dvar->current.string : "";
+				break;
+			default:
+				return false;
+			}
+
+			strncpy_s(out, cap, text.c_str(), _TRUNCATE);
+			return true;
+		}
+
 		void draw_hud()
 		{
 			if (!game::CL_IsCgameInitialized() || game::VirtualLobby_Loaded() || *game::client_state == nullptr)
@@ -120,6 +176,9 @@ namespace rust_ui
 			{
 				return;
 			}
+
+			static const codlegacy_host_api host{host_log, host_exec, host_dvar_string};
+			codlegacy_init(&host);
 
 			scheduler::loop(draw_hud, scheduler::pipeline::renderer);
 		}
