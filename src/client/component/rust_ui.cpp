@@ -160,7 +160,7 @@ namespace rust_ui
 		// 0 silent (loading), 1 menu, 3 match; sent to Rust when it changes.
 		int music_context()
 		{
-			if (*game::client_state != nullptr && game::CL_IsCgameInitialized() && !game::VirtualLobby_Loaded())
+			if (*game::mp::client_state != nullptr && game::CL_IsCgameInitialized() && !game::VirtualLobby_Loaded())
 			{
 				return 3;
 			}
@@ -202,7 +202,7 @@ namespace rust_ui
 
 		void draw_hud()
 		{
-			if (!game::CL_IsCgameInitialized() || game::VirtualLobby_Loaded() || *game::client_state == nullptr)
+			if (!game::CL_IsCgameInitialized() || game::VirtualLobby_Loaded() || *game::mp::client_state == nullptr)
 			{
 				return;
 			}
