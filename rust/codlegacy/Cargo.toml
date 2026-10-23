@@ -1,0 +1,11 @@
+[package]
+name = "codlegacy"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+rodio = { version = "0.23", default-features = false, features = ["playback", "flac", "mp3", "vorbis", "wav"] }
